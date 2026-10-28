@@ -29,9 +29,12 @@ def _resolve_repo_dir(repo_override=None) -> Path:
         candidates.append(Path(env_dir).expanduser())
     here = Path(__file__).resolve().parent
     candidates.extend([
-        here,
-        here.parent,
+        here.parent / "cleanyourtv",
+        here / "cleanyourtv",
         Path.cwd() / "cleanyourtv",
+        Path.cwd(),
+        here.parent,
+        here,
         Path.home() / "cleanyourtv",
     ])
     for candidate in candidates:
@@ -39,6 +42,8 @@ def _resolve_repo_dir(repo_override=None) -> Path:
             return candidate.resolve()
     if repo_override:
         return Path(repo_override).expanduser().resolve()
+    if (here.parent / "cleanyourtv" / "themes").is_dir():
+        return (here.parent / "cleanyourtv").resolve()
     return here.parent
 
 
@@ -131,6 +136,18 @@ THEME_CATALOG = [
         "title": "Six Columns Compact",
         "badge": "High Density",
         "description": "Six smaller tiles per row with one extra app grid row visible below the dock on pure black.",
+    },
+    {
+        "id": "our_default",
+        "title": "Our Default (Wikimedia Landscapes)",
+        "badge": "Active / 12 Photos",
+        "description": "12 curated Wikimedia Commons nature photography wallpapers with 30m rotation, Cairo Athan, live weather, sliding dock, and real-time TV sources.",
+    },
+    {
+        "id": "nature-calm",
+        "title": "Nature Calm",
+        "badge": "12 Landscapes",
+        "description": "12 calming natural landscape wallpapers from Wikimedia Commons with sequential rotation and photographer attributions.",
     },
     {
         "id": "dussehra",
@@ -482,13 +499,16 @@ def build_custom_theme_dir(ui_state):
         "animations",
         "advanced_effects",
         "boot_to_live_tv",
+        "show_weather",
+        "show_athan",
+        "show_profile",
     )
     for k in bool_keys:
         if k in ui_state:
             config[k] = bool(ui_state[k])
 
     int_keys = (
-        ("columns", 1, 8, 4),
+        ("columns", 1, 12, 4),
         ("rows_below_dock", 0, 3, 0),
         ("dock_opacity", 30, 100, 100),
         ("wallpaper_dim", 0, 90, 0),
@@ -516,6 +536,8 @@ def build_custom_theme_dir(ui_state):
         config["dock_apps"] = [str(x).strip() for x in ui_state["dock_apps"] if str(x).strip()]
     if "hidden_apps" in ui_state and isinstance(ui_state["hidden_apps"], list):
         config["hidden_apps"] = [str(x).strip() for x in ui_state["hidden_apps"] if str(x).strip()]
+    if "tv_sources" in ui_state and isinstance(ui_state["tv_sources"], list):
+        config["tv_sources"] = [str(x).strip() for x in ui_state["tv_sources"] if str(x).strip()]
 
     # Always keep live_tv_package set for Sony BRAVIA TVs
     config["live_tv_package"] = "com.sony.dtv.tvx"
@@ -534,16 +556,19 @@ def build_custom_theme_dir(ui_state):
 def run_cmd(args, tv_host, timeout=120):
     env = os.environ.copy()
     env["TV_HOST"] = tv_host
-    proc = subprocess.run(
-        args,
-        cwd=str(REPO_DIR),
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-    output = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
-    return proc.returncode, output.strip()
+    try:
+        proc = subprocess.run(
+            args,
+            cwd=str(REPO_DIR),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        output = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
+        return proc.returncode, output.strip()
+    except Exception as e:
+        return 1, f"Command execution error: {e}"
 
 
 def capture_live_screenshot(tv_host, keys=None):
@@ -1238,7 +1263,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <option value="5">5 Columns</option>
             <option value="6">6 Columns (Compact)</option>
             <option value="7">7 Columns</option>
-            <option value="8">8 Columns</option>
+            <option value="8">8 Columns (Wide)</option>
+            <option value="10">10 Columns (Dense Dock)</option>
+            <option value="12">12 Columns (Max Dock)</option>
           </select>
         </div>
 
@@ -1349,6 +1376,30 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <div class="desc">Show live CPU %, free RAM, and free storage line below the clock (`show_stats`).</div>
           </div>
           <label class="switch"><input type="checkbox" id="cfg_show_stats" onchange="syncPreviewJson()"><span class="slider"></span></label>
+        </div>
+
+        <div class="control-item">
+          <div class="control-info">
+            <div class="label">Live Weather Indicator</div>
+            <div class="desc">Live temperature &amp; condition with auto location detection (`show_weather`).</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="cfg_show_weather" onchange="syncPreviewJson()"><span class="slider"></span></label>
+        </div>
+
+        <div class="control-item">
+          <div class="control-info">
+            <div class="label">Cairo Athan Prayer Times</div>
+            <div class="desc">Displays next Cairo, Egypt local Islamic prayer time (`show_athan`).</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="cfg_show_athan" onchange="syncPreviewJson()"><span class="slider"></span></label>
+        </div>
+
+        <div class="control-item">
+          <div class="control-info">
+            <div class="label">Google Profile Avatar</div>
+            <div class="desc">Shows circular Google account profile avatar in top header (`show_profile`).</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="cfg_show_profile" onchange="syncPreviewJson()"><span class="slider"></span></label>
         </div>
       </div>
     </div>
@@ -1534,7 +1585,7 @@ const BOOL_IDS = [
   "icon_only_inputs", "top_menu", "wifi_status_color", "show_inputs_pill",
   "show_network_pill", "reorder_button", "show_stats", "f1_race_mode",
   "tile_menu", "app_library", "advanced_effects", "focus_overshoot",
-  "reduced_motion", "boot_to_live_tv"
+  "reduced_motion", "boot_to_live_tv", "show_weather", "show_athan", "show_profile"
 ];
 
 function updateRange(inputId, labelId, suffix) {
@@ -2021,6 +2072,9 @@ class ControlCenterHandler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length)
         return json.loads(raw.decode("utf-8"))
 
+    def do_HEAD(self):
+        self.do_GET()
+
     def do_GET(self):
         parsed = urlparse(self.path)
         route = parsed.path
@@ -2070,6 +2124,12 @@ class ControlCenterHandler(BaseHTTPRequestHandler):
         self.send_error(404, "Not Found")
 
     def do_POST(self):
+        try:
+            self._handle_post()
+        except Exception as e:
+            self._send_json({"ok": False, "output": f"Internal server error: {e}"}, status=500)
+
+    def _handle_post(self):
         parsed = urlparse(self.path)
         route = parsed.path
         body = self._read_json_body()
